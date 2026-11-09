@@ -12,7 +12,9 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "troque-essa-chave-em-producao")
 
 # Senha de acesso: defina APP_SENHA nas variáveis de ambiente
-APP_SENHA = os.environ.get("APP_SENHA", "tarot123")
+APP_SENHA = os.environ.get("APP_SENHA", "tarot@123#2026")
+
+APP_USUARIO = os.environ.get("APP_USUARIO", "suzana")
 
 # Em produção usa o Neon (DATABASE_URL). Localmente usa um arquivo SQLite.
 db_url = os.environ.get("DATABASE_URL", "sqlite:///atendimentos.db")
@@ -83,14 +85,18 @@ LOGIN = """
 <h1>🔮 Entrar</h1>
 <div class="card" style="max-width:360px">
 <form method="post">
+  <label>Usuário
+    <input name="usuario" required autofocus>
+  </label>
   <label>Senha
-    <input type="password" name="senha" required autofocus>
+    <input type="password" name="senha" required>
   </label>
   {% if erro %}<p class="nao">{{ erro }}</p>{% endif %}
   <p><input type="submit" value="Entrar"></p>
 </form>
 </div>
 """
+
 
 LISTA = """
 <div class="topo">
@@ -162,13 +168,17 @@ FORM = """
 def login():
     erro = None
     if request.method == "POST":
+        usuario = request.form.get("usuario", "")
         senha = request.form.get("senha", "")
-        if secrets.compare_digest(senha, APP_SENHA):
+        usuario_ok = secrets.compare_digest(usuario, APP_USUARIO)
+        senha_ok = secrets.compare_digest(senha, APP_SENHA)
+        if usuario_ok and senha_ok:
             session["logado"] = True
             return redirect(url_for("index"))
-        erro = "Senha incorreta."
+        erro = "Usuário ou senha incorretos."
     conteudo = render_template_string(LOGIN, erro=erro)
     return render_template_string(BASE, conteudo=conteudo)
+
 
 
 @app.route("/logout")

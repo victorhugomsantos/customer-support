@@ -1,0 +1,4 @@
+instance/
+*.db
+app.py.BKP
+__pycache__/
