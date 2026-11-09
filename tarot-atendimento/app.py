@@ -5,6 +5,8 @@ from functools import wraps
 from flask import (Flask, request, redirect, url_for,
                    render_template_string, session)
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+
 
 app = Flask(__name__)
 
@@ -34,9 +36,21 @@ class Atendimento(db.Model):
     pago = db.Column(db.Boolean, default=False)
     observacoes = db.Column(db.Text)
 
+class Usuario(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    usuario = db.Column(db.String(60), unique=True, nullable=False)
+    senha_hash = db.Column(db.String(255), nullable=False)
 
 with app.app_context():
     db.create_all()
+    # Na primeira execução, cria o usuário a partir das variáveis de ambiente
+    if not Usuario.query.first():
+        db.session.add(Usuario(
+            usuario=APP_USUARIO,
+            senha_hash=generate_password_hash(APP_SENHA),
+        ))
+        db.session.commit()
+
 
 
 def login_required(f):
@@ -46,6 +60,8 @@ def login_required(f):
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return wrapper
+
+
 
 
 BASE = """
@@ -101,6 +117,7 @@ LOGIN = """
 LISTA = """
 <div class="topo">
   <h1>🔮 Atendimentos</h1>
+  <a class="btn sec" href="{{ url_for('alterar_senha') }}">Alterar senha</a>
   <a class="btn sec" href="{{ url_for('logout') }}">Sair</a>
 </div>
 <a class="btn" href="{{ url_for('novo') }}">+ Novo atendimento</a>
@@ -176,9 +193,8 @@ def login():
     if request.method == "POST":
         usuario = request.form.get("usuario", "")
         senha = request.form.get("senha", "")
-        usuario_ok = secrets.compare_digest(usuario, APP_USUARIO)
-        senha_ok = secrets.compare_digest(senha, APP_SENHA)
-        if usuario_ok and senha_ok:
+        u = Usuario.query.filter_by(usuario=usuario).first()
+        if u and check_password_hash(u.senha_hash, senha):
             session["logado"] = True
             return redirect(url_for("index"))
         erro = "Usuário ou senha incorretos."
@@ -348,6 +364,56 @@ def relatorios():
                                       recebido=recebido, a_receber=a_receber)
     return render_template_string(BASE, conteudo=conteudo)
 
+
+
+ALTERAR_SENHA = """
+<div class="topo">
+  <h1>🔑 Alterar senha</h1>
+  <a class="btn sec" href="{{ url_for('index') }}">Voltar</a>
+</div>
+<div class="card" style="max-width:360px">
+<form method="post">
+  <label>Senha atual
+    <input type="password" name="atual" required>
+  </label>
+  <label>Nova senha (mínimo 6 caracteres)
+    <input type="password" name="nova" required>
+  </label>
+  <label>Confirmar nova senha
+    <input type="password" name="confirma" required>
+  </label>
+  {% if erro %}<p class="nao">{{ erro }}</p>{% endif %}
+  {% if ok %}<p class="pago">{{ ok }}</p>{% endif %}
+  <p><input type="submit" value="Salvar nova senha"></p>
+</form>
+</div>
+"""
+
+
+@app.route("/alterar-senha", methods=["GET", "POST"])
+@login_required
+def alterar_senha():
+    erro = None
+    ok = None
+    if request.method == "POST":
+        atual = request.form.get("atual", "")
+        nova = request.form.get("nova", "")
+        confirma = request.form.get("confirma", "")
+        u = Usuario.query.first()
+
+        if not check_password_hash(u.senha_hash, atual):
+            erro = "Senha atual incorreta."
+        elif len(nova) < 6:
+            erro = "A nova senha precisa ter pelo menos 6 caracteres."
+        elif nova != confirma:
+            erro = "As senhas não conferem."
+        else:
+            u.senha_hash = generate_password_hash(nova)
+            db.session.commit()
+            ok = "Senha alterada com sucesso."
+
+    conteudo = render_template_string(ALTERAR_SENHA, erro=erro, ok=ok)
+    return render_template_string(BASE, conteudo=conteudo)
 
 
 
