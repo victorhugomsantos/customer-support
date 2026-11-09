@@ -1,6 +1,6 @@
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from flask import (Flask, request, redirect, url_for,
                    render_template_string, session)
@@ -104,6 +104,8 @@ LISTA = """
   <a class="btn sec" href="{{ url_for('logout') }}">Sair</a>
 </div>
 <a class="btn" href="{{ url_for('novo') }}">+ Novo atendimento</a>
+<a class="btn sec" href="{{ url_for('relatorios') }}">Relatórios</a>
+
 
 <div class="resumo">
   <div>Atendimentos<br><strong>{{ total }}</strong></div>
@@ -258,6 +260,96 @@ def excluir(id):
     db.session.delete(a)
     db.session.commit()
     return redirect(url_for("index"))
+
+RELATORIOS = """
+<div class="topo">
+  <h1>📊 Relatórios</h1>
+  <a class="btn sec" href="{{ url_for('index') }}">Voltar</a>
+</div>
+
+<div class="card">
+<form method="get">
+  <label>Cliente (nome parcial)
+    <input name="cliente" value="{{ filtros.cliente }}">
+  </label>
+  <label>Data inicial
+    <input type="date" name="data_inicio" value="{{ filtros.data_inicio }}">
+  </label>
+  <label>Data final
+    <input type="date" name="data_fim" value="{{ filtros.data_fim }}">
+  </label>
+  <label>Situação
+    <select name="status">
+      <option value="todos" {% if filtros.status == 'todos' %}selected{% endif %}>Todos</option>
+      <option value="pagos" {% if filtros.status == 'pagos' %}selected{% endif %}>Pagos</option>
+      <option value="abertos" {% if filtros.status == 'abertos' %}selected{% endif %}>Não pagos</option>
+    </select>
+  </label>
+  <p><input type="submit" value="Filtrar"> <a class="btn sec" href="{{ url_for('relatorios') }}">Limpar</a></p>
+</form>
+</div>
+
+<div class="resumo">
+  <div>Atendimentos<br><strong>{{ atendimentos|length }}</strong></div>
+  <div>Total<br><strong>R$ {{ '%.2f'|format(total) }}</strong></div>
+  <div>Recebido<br><strong>R$ {{ '%.2f'|format(recebido) }}</strong></div>
+  <div>A receber<br><strong>R$ {{ '%.2f'|format(a_receber) }}</strong></div>
+</div>
+
+<table>
+  <tr><th>Data</th><th>Cliente</th><th>Tema</th><th>Valor</th><th>Situação</th></tr>
+  {% for a in atendimentos %}
+  <tr>
+    <td>{{ a.data_hora.strftime('%d/%m/%Y %H:%M') }}</td>
+    <td>{{ a.cliente }}</td>
+    <td>{{ a.tema or '' }}</td>
+    <td>R$ {{ '%.2f'|format(a.valor or 0) }}</td>
+    <td>{% if a.pago %}<span class="pago">Pago</span>{% else %}<span class="nao">Não pago</span>{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5">Nenhum atendimento encontrado com esses filtros.</td></tr>
+  {% endfor %}
+</table>
+"""
+
+
+@app.route("/relatorios")
+@login_required
+def relatorios():
+    filtros = {
+        "cliente": request.args.get("cliente", "").strip(),
+        "data_inicio": request.args.get("data_inicio", ""),
+        "data_fim": request.args.get("data_fim", ""),
+        "status": request.args.get("status", "todos"),
+    }
+
+    query = Atendimento.query
+    if filtros["cliente"]:
+        query = query.filter(Atendimento.cliente.ilike(f"%{filtros['cliente']}%"))
+    if filtros["data_inicio"]:
+        inicio = datetime.fromisoformat(filtros["data_inicio"])
+        query = query.filter(Atendimento.data_hora >= inicio)
+    if filtros["data_fim"]:
+        # inclui o dia final inteiro
+        fim = datetime.fromisoformat(filtros["data_fim"]) + timedelta(days=1)
+        query = query.filter(Atendimento.data_hora < fim)
+    if filtros["status"] == "pagos":
+        query = query.filter(Atendimento.pago.is_(True))
+    elif filtros["status"] == "abertos":
+        query = query.filter(Atendimento.pago.is_(False))
+
+    atendimentos = query.order_by(Atendimento.data_hora.desc()).all()
+    total = sum(float(a.valor or 0) for a in atendimentos)
+    recebido = sum(float(a.valor or 0) for a in atendimentos if a.pago)
+    a_receber = total - recebido
+
+    conteudo = render_template_string(RELATORIOS, atendimentos=atendimentos,
+                                      filtros=filtros, total=total,
+                                      recebido=recebido, a_receber=a_receber)
+    return render_template_string(BASE, conteudo=conteudo)
+
+
+
 
 
 if __name__ == "__main__":
