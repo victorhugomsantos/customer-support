@@ -39,6 +39,8 @@ class Usuario(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     usuario = db.Column(db.String(60), unique=True, nullable=False)
     senha_hash = db.Column(db.String(255), nullable=False)
+    # Muda ao clicar em "Sair de outros dispositivos", invalidando as outras sessões
+    sessao_versao = db.Column(db.Integer, nullable=False, default=0, server_default="0")
 
 
 with app.app_context():
@@ -52,13 +54,31 @@ with app.app_context():
         db.session.commit()
 
 
+def usuario_da_sessao():
+    if not session.get("logado"):
+        return None
+    return db.session.get(Usuario, session.get("usuario_id"))
+
+
+def sessao_valida():
+    u = usuario_da_sessao()
+    return u is not None and u.sessao_versao == session.get("versao")
+
+
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if not session.get("logado"):
+        if not sessao_valida():
+            session.clear()
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return wrapper
+
+
+@app.context_processor
+def injetar_usuario():
+    # Deixa o usuário logado disponível em todos os templates (para o menu)
+    return {"usuario_logado": usuario_da_sessao()}
 
 
 BASE = """
@@ -71,6 +91,7 @@ BASE = """
 <style>
   body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #faf7f2; color: #333; }
   h1 { color: #5b3e8a; }
+  h3 { margin-top: 0; color: #5b3e8a; }
   a.btn, button, input[type=submit] { background: #5b3e8a; color: #fff; border: 0; padding: .5rem 1rem; border-radius: 6px; text-decoration: none; cursor: pointer; font-size: .95rem; display: inline-block; }
   button.sec, a.sec { background: #888; }
   button.danger { background: #b03a3a; }
@@ -78,7 +99,7 @@ BASE = """
   th, td { padding: .6rem; border-bottom: 1px solid #eee; text-align: left; font-size: .95rem; }
   .pago { color: #2e7d32; font-weight: bold; }
   .nao { color: #b03a3a; font-weight: bold; }
-  .card { background: #fff; padding: 1rem 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px #0001; }
+  .card { background: #fff; padding: 1rem 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px #0001; margin-bottom: 1rem; }
   label { display: block; margin-top: .8rem; font-weight: 600; }
   input, textarea, select { width: 100%; padding: .5rem; margin-top: .3rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 1rem; }
   .resumo { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
@@ -87,9 +108,29 @@ BASE = """
   form.inline { display: inline; }
   .topo { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .5rem; }
   .acoes { display: flex; gap: .4rem; flex-wrap: wrap; }
+  .menu { display: flex; gap: 1.2rem; align-items: center; background: #5b3e8a; padding: .7rem 1rem; border-radius: 8px; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .menu > a { color: #fff; text-decoration: none; font-weight: 600; }
+  .usuario { margin-left: auto; position: relative; }
+  .usuario summary { color: #fff; cursor: pointer; font-weight: 600; list-style: none; }
+  .usuario .drop { position: absolute; right: 0; top: 2rem; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0003; padding: .4rem; min-width: 160px; z-index: 10; }
+  .usuario .drop a { display: block; padding: .5rem .8rem; color: #333; text-decoration: none; border-radius: 6px; }
+  .usuario .drop a:hover { background: #f1ecf8; }
 </style>
 </head>
 <body>
+{% if usuario_logado %}
+<nav class="menu">
+  <a href="{{ url_for('index') }}">🔮 Atendimentos</a>
+  <a href="{{ url_for('relatorios') }}">📊 Relatórios</a>
+  <details class="usuario">
+    <summary>👤 {{ usuario_logado.usuario }} ▾</summary>
+    <div class="drop">
+      <a href="{{ url_for('conta') }}">Minha conta</a>
+      <a href="{{ url_for('logout') }}">Sair</a>
+    </div>
+  </details>
+</nav>
+{% endif %}
 {{ conteudo|safe }}
 </body>
 </html>
@@ -114,14 +155,7 @@ LOGIN = """
 LISTA = """
 <div class="topo">
   <h1>🔮 Atendimentos</h1>
-  <div class="acoes">
-    <a class="btn sec" href="{{ url_for('alterar_senha') }}">Alterar senha</a>
-    <a class="btn sec" href="{{ url_for('logout') }}">Sair</a>
-  </div>
-</div>
-<div class="acoes">
   <a class="btn" href="{{ url_for('novo') }}">+ Novo atendimento</a>
-  <a class="btn sec" href="{{ url_for('relatorios') }}">Relatórios</a>
 </div>
 
 <div class="resumo">
@@ -189,7 +223,6 @@ FORM = """
 RELATORIOS = """
 <div class="topo">
   <h1>📊 Relatórios</h1>
-  <a class="btn sec" href="{{ url_for('index') }}">Voltar</a>
 </div>
 
 <div class="card">
@@ -237,28 +270,53 @@ RELATORIOS = """
 </table>
 """
 
-ALTERAR_SENHA = """
-<div class="topo">
-  <h1>🔑 Alterar senha</h1>
-  <a class="btn sec" href="{{ url_for('index') }}">Voltar</a>
+CONTA = """
+<div class="topo"><h1>👤 Minha conta</h1></div>
+{% if msg %}<p class="pago">{{ msg }}</p>{% endif %}
+{% if erro %}<p class="nao">{{ erro }}</p>{% endif %}
+
+<div class="card" style="max-width:420px">
+  <h3>Alterar senha</h3>
+  <form method="post">
+    <input type="hidden" name="acao" value="senha">
+    <label>Senha atual
+      <input type="password" name="atual" required>
+    </label>
+    <label>Nova senha (mínimo 6 caracteres)
+      <input type="password" name="nova" required>
+    </label>
+    <label>Confirmar nova senha
+      <input type="password" name="confirma" required>
+    </label>
+    <p><input type="submit" value="Salvar nova senha"></p>
+  </form>
 </div>
-<div class="card" style="max-width:360px">
-<form method="post">
-  <label>Senha atual
-    <input type="password" name="atual" required>
-  </label>
-  <label>Nova senha (mínimo 6 caracteres)
-    <input type="password" name="nova" required>
-  </label>
-  <label>Confirmar nova senha
-    <input type="password" name="confirma" required>
-  </label>
-  {% if erro %}<p class="nao">{{ erro }}</p>{% endif %}
-  {% if ok %}<p class="pago">{{ ok }}</p>{% endif %}
-  <p><input type="submit" value="Salvar nova senha"></p>
-</form>
+
+<div class="card" style="max-width:420px">
+  <h3>Alterar nome de usuário</h3>
+  <form method="post">
+    <input type="hidden" name="acao" value="usuario">
+    <label>Novo nome de usuário
+      <input name="novo_usuario" required value="{{ usuario_logado.usuario }}">
+    </label>
+    <label>Senha atual (para confirmar)
+      <input type="password" name="senha_confirma" required>
+    </label>
+    <p><input type="submit" value="Salvar nome"></p>
+  </form>
+</div>
+
+<div class="card" style="max-width:420px">
+  <h3>Sair de outros dispositivos</h3>
+  <p>Desconecta celulares e navegadores em que ela está logada. Este aparelho continua conectado.</p>
+  <form method="post" onsubmit="return confirm('Desconectar os outros dispositivos?')">
+    <input type="hidden" name="acao" value="sair_todos">
+    <button class="danger" type="submit">Sair de outros dispositivos</button>
+  </form>
 </div>
 """
+
+LOGIN_CHECADO = None  # placeholder removido; mantido só para clareza
 
 
 def preencher(a, form):
@@ -278,7 +336,10 @@ def login():
         senha = request.form.get("senha", "")
         u = Usuario.query.filter_by(usuario=usuario).first()
         if u and check_password_hash(u.senha_hash, senha):
+            session.clear()
             session["logado"] = True
+            session["usuario_id"] = u.id
+            session["versao"] = u.sessao_versao
             return redirect(url_for("index"))
         erro = "Usuário ou senha incorretos."
     conteudo = render_template_string(LOGIN, erro=erro)
@@ -387,30 +448,61 @@ def relatorios():
     return render_template_string(BASE, conteudo=conteudo)
 
 
-@app.route("/alterar-senha", methods=["GET", "POST"])
+@app.route("/conta", methods=["GET", "POST"])
+@login_required
+def conta():
+    msg = None
+    erro = None
+    u = usuario_da_sessao()
+
+    if request.method == "POST":
+        acao = request.form.get("acao")
+
+        if acao == "senha":
+            atual = request.form.get("atual", "")
+            nova = request.form.get("nova", "")
+            confirma = request.form.get("confirma", "")
+            if not check_password_hash(u.senha_hash, atual):
+                erro = "Senha atual incorreta."
+            elif len(nova) < 6:
+                erro = "A nova senha precisa ter pelo menos 6 caracteres."
+            elif nova != confirma:
+                erro = "As senhas não conferem."
+            else:
+                u.senha_hash = generate_password_hash(nova)
+                db.session.commit()
+                msg = "Senha alterada com sucesso."
+
+        elif acao == "usuario":
+            novo_nome = request.form.get("novo_usuario", "").strip()
+            senha_confirma = request.form.get("senha_confirma", "")
+            existe = Usuario.query.filter(Usuario.usuario == novo_nome, Usuario.id != u.id).first()
+            if not check_password_hash(u.senha_hash, senha_confirma):
+                erro = "Senha incorreta."
+            elif not novo_nome:
+                erro = "Digite um nome de usuário."
+            elif existe:
+                erro = "Esse nome já está em uso."
+            else:
+                u.usuario = novo_nome
+                db.session.commit()
+                msg = "Nome de usuário alterado com sucesso."
+
+        elif acao == "sair_todos":
+            u.sessao_versao += 1
+            db.session.commit()
+            # Atualiza a sessão atual para continuar válida neste aparelho
+            session["versao"] = u.sessao_versao
+            msg = "Os outros dispositivos foram desconectados."
+
+    return render_template_string(BASE, conteudo=render_template_string(
+        CONTA, msg=msg, erro=erro))
+
+
+@app.route("/alterar-senha")
 @login_required
 def alterar_senha():
-    erro = None
-    ok = None
-    if request.method == "POST":
-        atual = request.form.get("atual", "")
-        nova = request.form.get("nova", "")
-        confirma = request.form.get("confirma", "")
-        u = Usuario.query.first()
-
-        if not check_password_hash(u.senha_hash, atual):
-            erro = "Senha atual incorreta."
-        elif len(nova) < 6:
-            erro = "A nova senha precisa ter pelo menos 6 caracteres."
-        elif nova != confirma:
-            erro = "As senhas não conferem."
-        else:
-            u.senha_hash = generate_password_hash(nova)
-            db.session.commit()
-            ok = "Senha alterada com sucesso."
-
-    conteudo = render_template_string(ALTERAR_SENHA, erro=erro, ok=ok)
-    return render_template_string(BASE, conteudo=conteudo)
+    return redirect(url_for("conta"))
 
 
 if __name__ == "__main__":
