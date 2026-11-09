@@ -124,11 +124,13 @@ LISTA = """
         <button class="sec" type="submit">{% if a.pago %}<span class="pago">Sim</span>{% else %}<span class="nao">Não</span>{% endif %}</button>
       </form>
     </td>
-    <td>
+        <td>
+      <a class="btn sec" href="{{ url_for('editar', id=a.id) }}">Editar</a>
       <form class="inline" method="post" action="{{ url_for('excluir', id=a.id) }}" onsubmit="return confirm('Excluir este atendimento?')">
         <button class="danger" type="submit">Excluir</button>
       </form>
     </td>
+
   </tr>
   {% else %}
   <tr><td colspan="6">Nenhum atendimento registrado ainda.</td></tr>
@@ -137,31 +139,33 @@ LISTA = """
 """
 
 FORM = """
-<h1>Novo atendimento</h1>
+<h1>{{ titulo }}</h1>
 <div class="card">
-<form method="post">
+<form method="post" action="{{ action }}">
   <label>Cliente
-    <input name="cliente" required>
+    <input name="cliente" required value="{{ a.cliente if a else '' }}">
   </label>
   <label>Data e hora
-    <input type="datetime-local" name="data_hora" value="{{ agora }}" required>
+    <input type="datetime-local" name="data_hora" required
+           value="{{ a.data_hora.strftime('%Y-%m-%dT%H:%M') if a else agora }}">
   </label>
   <label>Tema / pergunta
-    <input name="tema">
+    <input name="tema" value="{{ a.tema or '' if a else '' }}">
   </label>
   <label>Valor (R$)
-    <input type="number" step="0.01" name="valor" value="0">
+    <input type="number" step="0.01" name="valor" value="{{ '%.2f'|format(a.valor or 0) if a else '0' }}">
   </label>
   <label>
-    <input type="checkbox" name="pago" style="width:auto"> Já foi pago
+    <input type="checkbox" name="pago" style="width:auto" {% if a and a.pago %}checked{% endif %}> Já foi pago
   </label>
   <label>Observações
-    <textarea name="observacoes" rows="4"></textarea>
+    <textarea name="observacoes" rows="4">{{ a.observacoes or '' if a else '' }}</textarea>
   </label>
   <p><input type="submit" value="Salvar"> <a class="btn" style="background:#888" href="{{ url_for('index') }}">Cancelar</a></p>
 </form>
 </div>
 """
+
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -199,24 +203,42 @@ def index():
     return render_template_string(BASE, conteudo=conteudo)
 
 
+def preencher(a, form):
+    a.cliente = form["cliente"].strip()
+    a.data_hora = datetime.fromisoformat(form["data_hora"])
+    a.tema = form.get("tema", "").strip()
+    a.valor = form.get("valor") or 0
+    a.pago = form.get("pago") == "on"
+    a.observacoes = form.get("observacoes", "").strip()
+
+
 @app.route("/novo", methods=["GET", "POST"])
 @login_required
 def novo():
     if request.method == "POST":
-        a = Atendimento(
-            cliente=request.form["cliente"].strip(),
-            data_hora=datetime.fromisoformat(request.form["data_hora"]),
-            tema=request.form.get("tema", "").strip(),
-            valor=request.form.get("valor") or 0,
-            pago=request.form.get("pago") == "on",
-            observacoes=request.form.get("observacoes", "").strip(),
-        )
+        a = Atendimento()
+        preencher(a, request.form)
         db.session.add(a)
         db.session.commit()
         return redirect(url_for("index"))
 
     agora = datetime.now().strftime("%Y-%m-%dT%H:%M")
-    conteudo = render_template_string(FORM, agora=agora)
+    conteudo = render_template_string(FORM, a=None, agora=agora,
+                                      titulo="Novo atendimento", action=url_for("novo"))
+    return render_template_string(BASE, conteudo=conteudo)
+
+
+@app.route("/editar/<int:id>", methods=["GET", "POST"])
+@login_required
+def editar(id):
+    a = db.get_or_404(Atendimento, id)
+    if request.method == "POST":
+        preencher(a, request.form)
+        db.session.commit()
+        return redirect(url_for("index"))
+
+    conteudo = render_template_string(FORM, a=a, agora=None,
+                                      titulo="Editar atendimento", action=url_for("editar", id=a.id))
     return render_template_string(BASE, conteudo=conteudo)
 
 
