@@ -7,16 +7,14 @@ from flask import (Flask, request, redirect, url_for,
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
-
 app = Flask(__name__)
 
 # Chave usada para assinar a sessão do login
 app.secret_key = os.environ.get("SECRET_KEY", "troque-essa-chave-em-producao")
 
-# Senha de acesso: defina APP_SENHA nas variáveis de ambiente
-APP_SENHA = os.environ.get("APP_SENHA", "tarot@123#2026")
-
-APP_USUARIO = os.environ.get("APP_USUARIO", "suzana")
+# Usuário e senha iniciais (usados só na primeira criação do usuário no banco)
+APP_USUARIO = os.environ.get("APP_USUARIO", "tarot")
+APP_SENHA = os.environ.get("APP_SENHA", "tarot123")
 
 # Em produção usa o Neon (DATABASE_URL). Localmente usa um arquivo SQLite.
 db_url = os.environ.get("DATABASE_URL", "sqlite:///atendimentos.db")
@@ -36,10 +34,12 @@ class Atendimento(db.Model):
     pago = db.Column(db.Boolean, default=False)
     observacoes = db.Column(db.Text)
 
+
 class Usuario(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     usuario = db.Column(db.String(60), unique=True, nullable=False)
     senha_hash = db.Column(db.String(255), nullable=False)
+
 
 with app.app_context():
     db.create_all()
@@ -52,7 +52,6 @@ with app.app_context():
         db.session.commit()
 
 
-
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -60,8 +59,6 @@ def login_required(f):
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return wrapper
-
-
 
 
 BASE = """
@@ -74,8 +71,8 @@ BASE = """
 <style>
   body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #faf7f2; color: #333; }
   h1 { color: #5b3e8a; }
-  a.btn, button, input[type=submit] { background: #5b3e8a; color: #fff; border: 0; padding: .5rem 1rem; border-radius: 6px; text-decoration: none; cursor: pointer; font-size: .95rem; }
-  button.sec { background: #888; }
+  a.btn, button, input[type=submit] { background: #5b3e8a; color: #fff; border: 0; padding: .5rem 1rem; border-radius: 6px; text-decoration: none; cursor: pointer; font-size: .95rem; display: inline-block; }
+  button.sec, a.sec { background: #888; }
   button.danger { background: #b03a3a; }
   table { width: 100%; border-collapse: collapse; background: #fff; }
   th, td { padding: .6rem; border-bottom: 1px solid #eee; text-align: left; font-size: .95rem; }
@@ -84,11 +81,12 @@ BASE = """
   .card { background: #fff; padding: 1rem 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px #0001; }
   label { display: block; margin-top: .8rem; font-weight: 600; }
   input, textarea, select { width: 100%; padding: .5rem; margin-top: .3rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 1rem; }
-  .resumo { display: flex; gap: 1rem; margin: 1rem 0; }
-  .resumo div { flex: 1; background: #fff; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px #0001; }
+  .resumo { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+  .resumo div { flex: 1; min-width: 140px; background: #fff; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px #0001; }
   .resumo strong { font-size: 1.4rem; color: #5b3e8a; }
   form.inline { display: inline; }
-  .topo { display: flex; justify-content: space-between; align-items: center; }
+  .topo { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .5rem; }
+  .acoes { display: flex; gap: .4rem; flex-wrap: wrap; }
 </style>
 </head>
 <body>
@@ -113,16 +111,18 @@ LOGIN = """
 </div>
 """
 
-
 LISTA = """
 <div class="topo">
   <h1>🔮 Atendimentos</h1>
-  <a class="btn sec" href="{{ url_for('alterar_senha') }}">Alterar senha</a>
-  <a class="btn sec" href="{{ url_for('logout') }}">Sair</a>
+  <div class="acoes">
+    <a class="btn sec" href="{{ url_for('alterar_senha') }}">Alterar senha</a>
+    <a class="btn sec" href="{{ url_for('logout') }}">Sair</a>
+  </div>
 </div>
-<a class="btn" href="{{ url_for('novo') }}">+ Novo atendimento</a>
-<a class="btn sec" href="{{ url_for('relatorios') }}">Relatórios</a>
-
+<div class="acoes">
+  <a class="btn" href="{{ url_for('novo') }}">+ Novo atendimento</a>
+  <a class="btn sec" href="{{ url_for('relatorios') }}">Relatórios</a>
+</div>
 
 <div class="resumo">
   <div>Atendimentos<br><strong>{{ total }}</strong></div>
@@ -143,13 +143,14 @@ LISTA = """
         <button class="sec" type="submit">{% if a.pago %}<span class="pago">Sim</span>{% else %}<span class="nao">Não</span>{% endif %}</button>
       </form>
     </td>
-        <td>
-      <a class="btn sec" href="{{ url_for('editar', id=a.id) }}">Editar</a>
-      <form class="inline" method="post" action="{{ url_for('excluir', id=a.id) }}" onsubmit="return confirm('Excluir este atendimento?')">
-        <button class="danger" type="submit">Excluir</button>
-      </form>
+    <td>
+      <div class="acoes">
+        <a class="btn sec" href="{{ url_for('editar', id=a.id) }}">Editar</a>
+        <form class="inline" method="post" action="{{ url_for('excluir', id=a.id) }}" onsubmit="return confirm('Excluir este atendimento?')">
+          <button class="danger" type="submit">Excluir</button>
+        </form>
+      </div>
     </td>
-
   </tr>
   {% else %}
   <tr><td colspan="6">Nenhum atendimento registrado ainda.</td></tr>
@@ -180,102 +181,10 @@ FORM = """
   <label>Observações
     <textarea name="observacoes" rows="4">{{ a.observacoes or '' if a else '' }}</textarea>
   </label>
-  <p><input type="submit" value="Salvar"> <a class="btn" style="background:#888" href="{{ url_for('index') }}">Cancelar</a></p>
+  <p><input type="submit" value="Salvar"> <a class="btn sec" href="{{ url_for('index') }}">Cancelar</a></p>
 </form>
 </div>
 """
-
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    erro = None
-    if request.method == "POST":
-        usuario = request.form.get("usuario", "")
-        senha = request.form.get("senha", "")
-        u = Usuario.query.filter_by(usuario=usuario).first()
-        if u and check_password_hash(u.senha_hash, senha):
-            session["logado"] = True
-            return redirect(url_for("index"))
-        erro = "Usuário ou senha incorretos."
-    conteudo = render_template_string(LOGIN, erro=erro)
-    return render_template_string(BASE, conteudo=conteudo)
-
-
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
-
-
-@app.route("/")
-@login_required
-def index():
-    atendimentos = Atendimento.query.order_by(Atendimento.data_hora.desc()).all()
-    total = len(atendimentos)
-    recebido = sum(float(a.valor or 0) for a in atendimentos if a.pago)
-    a_receber = sum(float(a.valor or 0) for a in atendimentos if not a.pago)
-    conteudo = render_template_string(LISTA, atendimentos=atendimentos,
-                                      total=total, recebido=recebido, a_receber=a_receber)
-    return render_template_string(BASE, conteudo=conteudo)
-
-
-def preencher(a, form):
-    a.cliente = form["cliente"].strip()
-    a.data_hora = datetime.fromisoformat(form["data_hora"])
-    a.tema = form.get("tema", "").strip()
-    a.valor = form.get("valor") or 0
-    a.pago = form.get("pago") == "on"
-    a.observacoes = form.get("observacoes", "").strip()
-
-
-@app.route("/novo", methods=["GET", "POST"])
-@login_required
-def novo():
-    if request.method == "POST":
-        a = Atendimento()
-        preencher(a, request.form)
-        db.session.add(a)
-        db.session.commit()
-        return redirect(url_for("index"))
-
-    agora = datetime.now().strftime("%Y-%m-%dT%H:%M")
-    conteudo = render_template_string(FORM, a=None, agora=agora,
-                                      titulo="Novo atendimento", action=url_for("novo"))
-    return render_template_string(BASE, conteudo=conteudo)
-
-
-@app.route("/editar/<int:id>", methods=["GET", "POST"])
-@login_required
-def editar(id):
-    a = db.get_or_404(Atendimento, id)
-    if request.method == "POST":
-        preencher(a, request.form)
-        db.session.commit()
-        return redirect(url_for("index"))
-
-    conteudo = render_template_string(FORM, a=a, agora=None,
-                                      titulo="Editar atendimento", action=url_for("editar", id=a.id))
-    return render_template_string(BASE, conteudo=conteudo)
-
-
-@app.route("/pago/<int:id>", methods=["POST"])
-@login_required
-def alternar_pago(id):
-    a = db.get_or_404(Atendimento, id)
-    a.pago = not a.pago
-    db.session.commit()
-    return redirect(url_for("index"))
-
-
-@app.route("/excluir/<int:id>", methods=["POST"])
-@login_required
-def excluir(id):
-    a = db.get_or_404(Atendimento, id)
-    db.session.delete(a)
-    db.session.commit()
-    return redirect(url_for("index"))
 
 RELATORIOS = """
 <div class="topo">
@@ -328,6 +237,119 @@ RELATORIOS = """
 </table>
 """
 
+ALTERAR_SENHA = """
+<div class="topo">
+  <h1>🔑 Alterar senha</h1>
+  <a class="btn sec" href="{{ url_for('index') }}">Voltar</a>
+</div>
+<div class="card" style="max-width:360px">
+<form method="post">
+  <label>Senha atual
+    <input type="password" name="atual" required>
+  </label>
+  <label>Nova senha (mínimo 6 caracteres)
+    <input type="password" name="nova" required>
+  </label>
+  <label>Confirmar nova senha
+    <input type="password" name="confirma" required>
+  </label>
+  {% if erro %}<p class="nao">{{ erro }}</p>{% endif %}
+  {% if ok %}<p class="pago">{{ ok }}</p>{% endif %}
+  <p><input type="submit" value="Salvar nova senha"></p>
+</form>
+</div>
+"""
+
+
+def preencher(a, form):
+    a.cliente = form["cliente"].strip()
+    a.data_hora = datetime.fromisoformat(form["data_hora"])
+    a.tema = form.get("tema", "").strip()
+    a.valor = form.get("valor") or 0
+    a.pago = form.get("pago") == "on"
+    a.observacoes = form.get("observacoes", "").strip()
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    erro = None
+    if request.method == "POST":
+        usuario = request.form.get("usuario", "").strip()
+        senha = request.form.get("senha", "")
+        u = Usuario.query.filter_by(usuario=usuario).first()
+        if u and check_password_hash(u.senha_hash, senha):
+            session["logado"] = True
+            return redirect(url_for("index"))
+        erro = "Usuário ou senha incorretos."
+    conteudo = render_template_string(LOGIN, erro=erro)
+    return render_template_string(BASE, conteudo=conteudo)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.route("/")
+@login_required
+def index():
+    atendimentos = Atendimento.query.order_by(Atendimento.data_hora.desc()).all()
+    total = len(atendimentos)
+    recebido = sum(float(a.valor or 0) for a in atendimentos if a.pago)
+    a_receber = sum(float(a.valor or 0) for a in atendimentos if not a.pago)
+    conteudo = render_template_string(LISTA, atendimentos=atendimentos,
+                                      total=total, recebido=recebido, a_receber=a_receber)
+    return render_template_string(BASE, conteudo=conteudo)
+
+
+@app.route("/novo", methods=["GET", "POST"])
+@login_required
+def novo():
+    if request.method == "POST":
+        a = Atendimento()
+        preencher(a, request.form)
+        db.session.add(a)
+        db.session.commit()
+        return redirect(url_for("index"))
+
+    agora = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    conteudo = render_template_string(FORM, a=None, agora=agora,
+                                      titulo="Novo atendimento", action=url_for("novo"))
+    return render_template_string(BASE, conteudo=conteudo)
+
+
+@app.route("/editar/<int:id>", methods=["GET", "POST"])
+@login_required
+def editar(id):
+    a = db.get_or_404(Atendimento, id)
+    if request.method == "POST":
+        preencher(a, request.form)
+        db.session.commit()
+        return redirect(url_for("index"))
+
+    conteudo = render_template_string(FORM, a=a, agora=None,
+                                      titulo="Editar atendimento", action=url_for("editar", id=a.id))
+    return render_template_string(BASE, conteudo=conteudo)
+
+
+@app.route("/pago/<int:id>", methods=["POST"])
+@login_required
+def alternar_pago(id):
+    a = db.get_or_404(Atendimento, id)
+    a.pago = not a.pago
+    db.session.commit()
+    return redirect(url_for("index"))
+
+
+@app.route("/excluir/<int:id>", methods=["POST"])
+@login_required
+def excluir(id):
+    a = db.get_or_404(Atendimento, id)
+    db.session.delete(a)
+    db.session.commit()
+    return redirect(url_for("index"))
+
 
 @app.route("/relatorios")
 @login_required
@@ -365,31 +387,6 @@ def relatorios():
     return render_template_string(BASE, conteudo=conteudo)
 
 
-
-ALTERAR_SENHA = """
-<div class="topo">
-  <h1>🔑 Alterar senha</h1>
-  <a class="btn sec" href="{{ url_for('index') }}">Voltar</a>
-</div>
-<div class="card" style="max-width:360px">
-<form method="post">
-  <label>Senha atual
-    <input type="password" name="atual" required>
-  </label>
-  <label>Nova senha (mínimo 6 caracteres)
-    <input type="password" name="nova" required>
-  </label>
-  <label>Confirmar nova senha
-    <input type="password" name="confirma" required>
-  </label>
-  {% if erro %}<p class="nao">{{ erro }}</p>{% endif %}
-  {% if ok %}<p class="pago">{{ ok }}</p>{% endif %}
-  <p><input type="submit" value="Salvar nova senha"></p>
-</form>
-</div>
-"""
-
-
 @app.route("/alterar-senha", methods=["GET", "POST"])
 @login_required
 def alterar_senha():
@@ -414,8 +411,6 @@ def alterar_senha():
 
     conteudo = render_template_string(ALTERAR_SENHA, erro=erro, ok=ok)
     return render_template_string(BASE, conteudo=conteudo)
-
-
 
 
 if __name__ == "__main__":
